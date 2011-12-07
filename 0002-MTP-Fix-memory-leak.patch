@@ -1,0 +1,30 @@
+From 93f102c877bc81cf6ec9f85204fa29cba2f0120c Mon Sep 17 00:00:00 2001
+From: Martin Pitt <martin.pitt@ubuntu.com>
+Date: Wed, 14 Apr 2010 16:46:18 +0200
+Subject: [PATCH 02/11] MTP: Fix memory leak
+
+Free the list returned by LIBMTP_Detect_Raw_Devices() after we are done with
+it.
+---
+ plugins/mtpdevice/rb-mtp-plugin.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/plugins/mtpdevice/rb-mtp-plugin.c b/plugins/mtpdevice/rb-mtp-plugin.c
+index 43a4b15..10044b8 100644
+--- a/plugins/mtpdevice/rb-mtp-plugin.c
++++ b/plugins/mtpdevice/rb-mtp-plugin.c
+@@ -385,9 +385,11 @@ create_source_device_cb (RBRemovableMediaManager *rmm, GObject *device_obj, RBMt
+ 			g_signal_connect_object (G_OBJECT (source),
+ 						"deleted", G_CALLBACK (source_deleted_cb),
+ 						plugin, 0);
++			free (raw_devices);
+ 			return source;
+ 		}
+ 	}
++	free (raw_devices);
+ 
+ 	rb_debug ("device didn't match anything");
+ 	return NULL;
+-- 
+1.7.1
+

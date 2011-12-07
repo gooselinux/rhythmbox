@@ -1,0 +1,35 @@
+From 02bdb6fe040acc1927101a10e149241f13628948 Mon Sep 17 00:00:00 2001
+From: Jonathan Matthew <jonathan@d14n.org>
+Date: Mon, 31 May 2010 22:28:06 +1000
+Subject: [PATCH 08/11] mtp: report out-of-space errors on track upload
+
+---
+ plugins/mtpdevice/rb-mtp-thread.c |   12 +++++++++---
+ 1 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/plugins/mtpdevice/rb-mtp-thread.c b/plugins/mtpdevice/rb-mtp-thread.c
+index 02aac6d..9bd4675 100644
+--- a/plugins/mtpdevice/rb-mtp-thread.c
++++ b/plugins/mtpdevice/rb-mtp-thread.c
+@@ -517,9 +517,15 @@ upload_track (RBMtpThread *thread, RBMtpThreadTask *task)
+ 	if (LIBMTP_Send_Track_From_File (thread->device, task->filename, task->track, NULL, NULL)) {
+ 		stack = LIBMTP_Get_Errorstack (thread->device);
+ 		rb_debug ("unable to send track: %s", stack->error_text);
+-		error = g_error_new (RB_MTP_THREAD_ERROR, RB_MTP_THREAD_ERROR_SEND_TRACK,
+-				     _("Unable to send file to MTP device: %s"),
+-				     stack->error_text);
++
++		if (stack->errornumber == LIBMTP_ERROR_STORAGE_FULL) {
++			error = g_error_new (RB_MTP_THREAD_ERROR, RB_MTP_THREAD_ERROR_NO_SPACE,
++					     _("No space left on MTP device"));
++		} else {
++			error = g_error_new (RB_MTP_THREAD_ERROR, RB_MTP_THREAD_ERROR_SEND_TRACK,
++					     _("Unable to send file to MTP device: %s"),
++					     stack->error_text);
++		}
+ 		LIBMTP_Clear_Errorstack (thread->device);
+ 		task->track->item_id = 0;		/* is this actually an invalid item ID? */
+ 	}
+-- 
+1.7.1
+

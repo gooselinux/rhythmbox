@@ -1,0 +1,28 @@
+From 7f648a23ae195bc7bce612c79de7e373c72d66ca Mon Sep 17 00:00:00 2001
+From: Jonathan Matthew <jonathan@d14n.org>
+Date: Fri, 23 Apr 2010 07:27:05 +1000
+Subject: [PATCH 03/11] generic-player: don't crash saving empty playlists (bug #616538)
+
+If we try to save an empty playlist, totem-pl-parser currently returns
+FALSE without providing any error information, but we were expecting the
+error information to be there.
+---
+ .../rb-generic-player-playlist-source.c            |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/plugins/generic-player/rb-generic-player-playlist-source.c b/plugins/generic-player/rb-generic-player-playlist-source.c
+index 2c0ec4e..7be15f7 100644
+--- a/plugins/generic-player/rb-generic-player-playlist-source.c
++++ b/plugins/generic-player/rb-generic-player-playlist-source.c
+@@ -273,7 +273,7 @@ save_playlist (RBGenericPlayerPlaylistSource *source)
+ #endif
+ 	if (result == FALSE) {
+ 		/* XXX report this more usefully */
+-		g_warning ("Playlist save failed: %s", error->message);
++		g_warning ("Playlist save failed: %s", error ? error->message : "<no error>");
+ 	} else {
+ 		GFile *dest;
+ 
+-- 
+1.7.1
+

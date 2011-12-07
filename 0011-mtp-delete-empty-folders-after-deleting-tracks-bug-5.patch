@@ -1,0 +1,205 @@
+From a21d3b58ad24aa9f4cf59dec7587cf14b427a8e1 Mon Sep 17 00:00:00 2001
+From: Jonathan Matthew <jonathan@d14n.org>
+Date: Wed, 16 Jun 2010 17:50:14 +1000
+Subject: [PATCH 11/11] mtp: delete empty folders after deleting tracks (bug #593641)
+
+After deleting a set of tracks, we now check the folders that we
+deleted from, deleting them if they are now empty.  Empty parent
+folders are also deleted, all the way up to the root.
+---
+ plugins/mtpdevice/rb-mtp-source.c |  179 +++++++++++++++++++++++++++++++++++++
+ 1 files changed, 179 insertions(+), 0 deletions(-)
+
+diff --git a/plugins/mtpdevice/rb-mtp-source.c b/plugins/mtpdevice/rb-mtp-source.c
+index d82bc7e..20b58de 100644
+--- a/plugins/mtpdevice/rb-mtp-source.c
++++ b/plugins/mtpdevice/rb-mtp-source.c
+@@ -1315,6 +1315,185 @@ impl_get_free_space	(RBMediaPlayerSource *source)
+ 	return priv->free_space;
+ }
+ 
++typedef struct {
++	gboolean actually_free;
++	GHashTable *check_folders;
++	RBMediaPlayerSource *source;
++	RBMediaPlayerSourceDeleteCallback callback;
++	gpointer callback_data;
++	GDestroyNotify destroy_data;
++} TracksDeletedCallbackData;
++
++static void
++free_delete_data (TracksDeletedCallbackData *data)
++{
++	if (data->actually_free == FALSE) {
++		return;
++	}
++
++	g_hash_table_destroy (data->check_folders);
++	g_object_unref (data->source);
++	if (data->destroy_data) {
++		data->destroy_data (data->callback_data);
++	}
++	g_free (data);
++}
++
++static gboolean
++delete_done_idle_cb (TracksDeletedCallbackData *data)
++{
++	if (data->callback) {
++		data->callback (data->source, data->callback_data);
++	}
++
++	data->actually_free = TRUE;
++	free_delete_data (data);
++	return FALSE;
++}
++
++static void
++delete_done_cb (LIBMTP_mtpdevice_t *device, TracksDeletedCallbackData *data)
++{
++	LIBMTP_folder_t *folders;
++	LIBMTP_file_t *files;
++
++	data->actually_free = FALSE;
++	update_free_space_cb (device, RB_MTP_SOURCE (data->source));
++
++	/* if any of the folders we just deleted from are now empty, delete them */
++	folders = LIBMTP_Get_Folder_List (device);
++	files = LIBMTP_Get_Filelisting_With_Callback (device, NULL, NULL);
++	if (folders != NULL) {
++		GHashTableIter iter;
++		gpointer key;
++		g_hash_table_iter_init (&iter, data->check_folders);
++		while (g_hash_table_iter_next (&iter, &key, NULL)) {
++			LIBMTP_folder_t *f;
++			LIBMTP_folder_t *c;
++			LIBMTP_file_t *file;
++			uint32_t folder_id = GPOINTER_TO_UINT(key);
++
++			while (folder_id != device->default_music_folder && folder_id != 0) {
++
++				f = LIBMTP_Find_Folder (folders, folder_id);
++				if (f == NULL) {
++					rb_debug ("unable to find folder %u", folder_id);
++					break;
++				}
++
++				/* don't delete folders with children that we didn't just delete */
++				for (c = f->child; c != NULL; c = c->sibling) {
++					if (g_hash_table_lookup (data->check_folders,
++								 GUINT_TO_POINTER (c->folder_id)) == NULL) {
++						break;
++					}
++				}
++				if (c != NULL) {
++					rb_debug ("folder %s has children", f->name);
++					break;
++				}
++
++				/* don't delete folders that contain files */
++				for (file = files; file != NULL; file = file->next) {
++					if (file->parent_id == folder_id) {
++						break;
++					}
++				}
++
++				if (file != NULL) {
++					rb_debug ("folder %s contains at least one file: %s", f->name, file->filename);
++					break;
++				}
++
++				/* ok, the folder is empty */
++				rb_debug ("deleting empty folder %s", f->name);
++				LIBMTP_Delete_Object (device, f->folder_id);
++
++				/* if the folder we just deleted has siblings, the parent
++				 * can't be empty.
++				 */
++				if (f->sibling != NULL) {
++					rb_debug ("folder %s has siblings, can't delete parent", f->name);
++					break;
++				}
++				folder_id = f->parent_id;
++			}
++		}
++
++		LIBMTP_destroy_folder_t (folders);
++	} else {
++		rb_debug ("unable to get device folder list");
++	}
++
++	/* clean up the file list */
++	while (files != NULL) {
++		LIBMTP_file_t *n;
++
++		n = files->next;
++		LIBMTP_destroy_file_t (files);
++		files = n;
++	}
++
++	g_idle_add ((GSourceFunc) delete_done_idle_cb, data);
++}
++
++static void
++impl_delete_entries	(RBMediaPlayerSource *source,
++			 GList *entries,
++			 RBMediaPlayerSourceDeleteCallback callback,
++			 gpointer user_data,
++			 GDestroyNotify destroy_data)
++{
++	RBMtpSourcePrivate *priv = MTP_SOURCE_GET_PRIVATE (source);
++	RhythmDB *db;
++	GList *i;
++	TracksDeletedCallbackData *cb_data;
++
++	cb_data = g_new0 (TracksDeletedCallbackData, 1);
++	cb_data->source = g_object_ref (source);
++	cb_data->callback_data = user_data;
++	cb_data->callback = callback;
++	cb_data->destroy_data = destroy_data;
++	cb_data->check_folders = g_hash_table_new (g_direct_hash, g_direct_equal);
++
++	db = get_db_for_source (RB_MTP_SOURCE (source));
++	for (i = entries; i != NULL; i = i->next) {
++		LIBMTP_track_t *track;
++		const char *uri;
++		const char *album_name;
++		RhythmDBEntry *entry;
++
++		entry = i->data;
++		uri = rhythmdb_entry_get_string (entry, RHYTHMDB_PROP_LOCATION);
++		track = g_hash_table_lookup (priv->entry_map, entry);
++		if (track == NULL) {
++			rb_debug ("Couldn't find track on mtp-device! (%s)", uri);
++			continue;
++		}
++
++		album_name = rhythmdb_entry_get_string (entry, RHYTHMDB_PROP_ALBUM);
++		if (g_strcmp0 (album_name, _("Unknown")) != 0) {
++			rb_mtp_thread_remove_from_album (priv->device_thread, track, album_name);
++		}
++		rb_mtp_thread_delete_track (priv->device_thread, track);
++
++		g_hash_table_insert (cb_data->check_folders,
++				     GUINT_TO_POINTER (track->parent_id),
++				     GINT_TO_POINTER (1));
++
++		g_hash_table_remove (priv->entry_map, entry);
++		rhythmdb_entry_delete (db, entry);
++	}
++
++	/* callback when all tracks have been deleted */
++	rb_mtp_thread_queue_callback (priv->device_thread,
++				      (RBMtpThreadCallback) delete_done_cb,
++				      cb_data,
++				      (GDestroyNotify) free_delete_data);
++
++	rhythmdb_commit (db);
++}
++
+ static void
+ impl_show_properties (RBMediaPlayerSource *source, GtkWidget *info_box, GtkWidget *notebook)
+ {
+-- 
+1.7.1
+

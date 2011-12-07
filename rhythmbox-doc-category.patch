@@ -1,0 +1,16 @@
+diff -up rhythmbox-0.12.6/help/rhythmbox.omf.in.doc-category rhythmbox-0.12.6/help/rhythmbox.omf.in
+--- rhythmbox-0.12.6/help/rhythmbox.omf.in.doc-category	2010-05-03 16:19:16.117183011 -0400
++++ rhythmbox-0.12.6/help/rhythmbox.omf.in	2010-05-03 16:19:25.761183430 -0400
+@@ -1,9 +1,9 @@
+ <?xml version="1.0" standalone="no"?>
+ <omf>
+   <resource>
+-    <subject category="GNOME|Applications|Sound and Video"/>
++    <subject category="GNOME|Multimedia"/>
+     <type>manual</type>
+     <relation seriesid="cf2bed6a-3e28-11d6-88f3-c2f7a14f1d6d"/>
+     <rights type="GNU FDL" license.version="1.1" holder="HOWNER"/>
+   </resource>
+-</omf>
+\ No newline at end of file
++</omf>

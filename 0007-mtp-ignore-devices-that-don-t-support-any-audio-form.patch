@@ -1,0 +1,90 @@
+From eff78efb2787ff040cd37543e8556bda430b2822 Mon Sep 17 00:00:00 2001
+From: Jonathan Matthew <jonathan@d14n.org>
+Date: Wed, 19 May 2010 20:16:45 +1000
+Subject: [PATCH 07/11] mtp: ignore devices that don't support any audio formats (bug #615743)
+
+libmtp also detects PTP cameras. It does not actually know them (in the
+udev rules), but since we do not check for this, PTP cameras regularly
+appear in Rhythmbox, which is confusing and useless.
+
+Check the supported file types of the device for audio types, and ignore
+the device if there aren't any suitable ones. Please note that a lot of
+cameras support read-only WAV, which is fairly uninteresting for our
+purposes and would lead to detecting them as music players, so ignore WAV.
+---
+ plugins/mtpdevice/rb-mtp-source.c |   31 ++++++++++++++++++++++++++++++-
+ plugins/mtpdevice/rb-mtp-thread.c |    2 +-
+ 2 files changed, 31 insertions(+), 2 deletions(-)
+
+diff --git a/plugins/mtpdevice/rb-mtp-source.c b/plugins/mtpdevice/rb-mtp-source.c
+index 5ae7726..d82bc7e 100644
+--- a/plugins/mtpdevice/rb-mtp-source.c
++++ b/plugins/mtpdevice/rb-mtp-source.c
+@@ -848,11 +848,23 @@ device_open_failed_idle (RBMtpSource *source)
+ 	return FALSE;
+ }
+ 
++static gboolean
++device_open_ignore_idle (DeviceOpenedData *data)
++{
++	rb_source_delete_thyself (RB_SOURCE (data->source));
++	g_object_unref (data->source);
++	free (data->types);
++	g_free (data->name);
++	g_free (data);
++	return FALSE;
++}
++
+ /* this callback runs on the device handling thread, so it can call libmtp directly */
+ static void
+ mtp_device_open_cb (LIBMTP_mtpdevice_t *device, RBMtpSource *source)
+ {
+ 	RBMtpSourcePrivate *priv = MTP_SOURCE_GET_PRIVATE (source);
++	gboolean has_audio = FALSE;
+ 	DeviceOpenedData *data;
+ 
+ 	if (device == NULL) {
+@@ -894,9 +906,26 @@ mtp_device_open_cb (LIBMTP_mtpdevice_t *device, RBMtpSource *source)
+ 
+ 	update_free_space_cb (device, RB_MTP_SOURCE (source));
+ 
+-	/* figure out the set of formats supported by the device */
++	/* figure out the set of formats supported by the device, ensuring there's at least
++	 * one audio format aside from WAV.  the purpose of this is to exclude cameras and other
++	 * MTP devices that aren't interesting to us.
++	 */
+ 	if (LIBMTP_Get_Supported_Filetypes (device, &data->types, &data->num_types) != 0) {
+ 		rb_mtp_thread_report_errors (priv->device_thread, FALSE);
++	} else {
++		int i;
++		for (i = 0; i < data->num_types; i++) {
++			if (data->types[i] != LIBMTP_FILETYPE_WAV && LIBMTP_FILETYPE_IS_AUDIO (data->types[i])) {
++				has_audio = TRUE;
++				break;
++			}
++		}
++	}
++
++	if (has_audio == FALSE) {
++		rb_debug ("device doesn't support any audio formats");
++		g_idle_add ((GSourceFunc) device_open_ignore_idle, data);
++		return;
+ 	}
+ 
+ 	g_idle_add ((GSourceFunc) device_opened_idle, data);
+diff --git a/plugins/mtpdevice/rb-mtp-thread.c b/plugins/mtpdevice/rb-mtp-thread.c
+index a2310b6..02aac6d 100644
+--- a/plugins/mtpdevice/rb-mtp-thread.c
++++ b/plugins/mtpdevice/rb-mtp-thread.c
+@@ -144,7 +144,7 @@ open_device (RBMtpThread *thread, RBMtpThreadTask *task)
+ 	int retry;
+ 
+ 	/* open the device */
+-	rb_debug ("attempting to open retry device");
++	rb_debug ("attempting to open device");
+ 	for (retry = 0; retry < 5; retry++) {
+ 		if (retry > 0) {
+ 			/* sleep a while before trying again */
+-- 
+1.7.1
+

@@ -1,0 +1,36 @@
+From f5575cf232b8b985b8e042a3e83eb154585cb476 Mon Sep 17 00:00:00 2001
+From: Jonathan Matthew <jonathan@d14n.org>
+Date: Mon, 26 Apr 2010 21:14:35 +1000
+Subject: [PATCH 05/11] rhythmdb: use g_ascii_strtod to read the db version (bug #616636)
+
+We previously used sscanf(), which is (sometimes?) locale-aware, so in
+some locales, it was expecting a comma instead of a full stop as the
+decimal separator.  Misreading the version causes upgrade processing to
+be run on each startup, rather than just once, which messes up podcasts
+among other things.
+---
+ rhythmdb/rhythmdb-tree.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/rhythmdb/rhythmdb-tree.c b/rhythmdb/rhythmdb-tree.c
+index 39cbc5a..e2a18c4 100644
+--- a/rhythmdb/rhythmdb-tree.c
++++ b/rhythmdb/rhythmdb-tree.c
+@@ -342,11 +342,12 @@ static int
+ version_to_int (const char *version)
+ {
+ 	float ver;
++	char *eptr;
+ 
+-	if (sscanf (version, "%f", &ver) != 1) {
++	ver = g_ascii_strtod (version, &eptr);
++	if (eptr == version) {
+ 		return (int) (1.0 * 100);
+ 	}
+-
+ 	return (int)roundf(ver * 100);
+ }
+ 
+-- 
+1.7.1
+

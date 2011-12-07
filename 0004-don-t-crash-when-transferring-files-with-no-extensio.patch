@@ -1,0 +1,61 @@
+From 21fdd198d91b872ecdaadb43014a6e6d0c22945d Mon Sep 17 00:00:00 2001
+From: Jonathan Matthew <jonathan@d14n.org>
+Date: Sun, 25 Apr 2010 12:41:30 +1000
+Subject: [PATCH 04/11] don't crash when transferring files with no extension (bug #616411)
+
+---
+ plugins/ipod/rb-ipod-source.c       |    9 ++++++---
+ plugins/mtpdevice/rb-mtp-source.c   |    3 +++
+ sources/rb-removable-media-source.c |    2 +-
+ 3 files changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/plugins/ipod/rb-ipod-source.c b/plugins/ipod/rb-ipod-source.c
+index ffddd78..816850b 100644
+--- a/plugins/ipod/rb-ipod-source.c
++++ b/plugins/ipod/rb-ipod-source.c
+@@ -1562,9 +1562,12 @@ ipod_get_filename_for_uri (const gchar *mount_point,
+ 		*escaped = 0;
+ 	}
+ 
+-	escaped = g_strdup_printf ("%s.%s", filename, extension);
+-	g_free (filename);
+-
++	if (extension != NULL) {
++		escaped = g_strdup_printf ("%s.%s", filename, extension);
++		g_free (filename);
++	} else {
++		escaped = filename;
++	}
+ 
+ 	result = generate_ipod_filename (mount_point, escaped);
+ 	g_free (escaped);
+diff --git a/plugins/mtpdevice/rb-mtp-source.c b/plugins/mtpdevice/rb-mtp-source.c
+index cc8167d..5ae7726 100644
+--- a/plugins/mtpdevice/rb-mtp-source.c
++++ b/plugins/mtpdevice/rb-mtp-source.c
+@@ -1236,6 +1236,9 @@ impl_build_dest_uri (RBRemovableMediaSource *source,
+ 	 * encoder; and then passed to whatever gets called when the transfer is complete.
+ 	 */
+ 	id = rhythmdb_entry_get_ulong (entry, RHYTHMDB_PROP_ENTRY_ID);
++	if (extension == NULL) {
++		extension = "";
++	}
+ 	uri = g_strdup_printf ("xrbmtp://%lu/%s/%d", id, extension, filetype);
+ 	return uri;
+ }
+diff --git a/sources/rb-removable-media-source.c b/sources/rb-removable-media-source.c
+index 3cf1f7f..1096b8a 100644
+--- a/sources/rb-removable-media-source.c
++++ b/sources/rb-removable-media-source.c
+@@ -417,7 +417,7 @@ impl_paste (RBSource *source, GList *entries)
+ 		}
+ 
+ 		/* make sure the extension isn't ludicrously long */
+-		if (strlen (extension) > EXTENSION_LENGTH_LIMIT) {
++		if (extension != NULL && strlen (extension) > EXTENSION_LENGTH_LIMIT) {
+ 			extension[EXTENSION_LENGTH_LIMIT] = '\0';
+ 		}
+ 
+-- 
+1.7.1
+
